@@ -287,3 +287,31 @@ You can reach the Harbor community and developers via the following channels:
 
 - [#harbor-satellite on CNCF Slack](https://cloud-native.slack.com/archives/C06NE6EJBU1) (Request an invite to join the CNCF Slack via [slack.cncf.io](https://slack.cncf.io/))
 - Mailing lists: [harbor-users@lists.cncf.io](https://lists.cncf.io/g/harbor-users) (users) / [harbor-dev@lists.cncf.io](https://lists.cncf.io/g/harbor-dev) (developers)
+
+---
+
+## LFX Mentorship 2026 Term 3 — Application
+
+This fork is part of my application for [container-registry/harbor-satellite#542](https://github.com/container-registry/harbor-satellite/issues/542) (CNCF LFX Mentorship, Sep–Nov 2026): **Air-Gapped Peer-to-Peer OCI Image Distribution**.
+
+The project adds an opt-in peer-to-peer distribution mode so trusted Harbor Satellite instances on the same isolated network can share OCI images directly — without Internet, Harbor, or Ground Control connectivity. When one Satellite already has a needed artifact, another can obtain it from that peer, verified by digest, instead of repeating offline bootstrap for every node.
+
+### Application materials
+
+All application materials are in [`application/`](application/):
+
+| Document | Description |
+|---|---|
+| [RFC: Trusted-Peer Artifact Distribution](application/RFC-satellite-p2p-distribution.html) | Full design RFC covering the peer model, digest-graph integrity, source abstraction (ADR-0009 compatible), trust boundary, and air-gapped integration testing |
+| [Cover Letter](application/cover-letter.pdf) | Why this project, relevant experience, and what I'd bring to the mentorship |
+| [Resume](application/resume.pdf) | Background in distributed systems, container registries, and edge computing |
+
+### Related PRs
+
+- [#638](https://github.com/container-registry/harbor-satellite/pull/638) — ADR-0010: Peer-to-peer artifact distribution design
+- [#637](https://github.com/container-registry/harbor-satellite/pull/637) — Fix: resolve replication source by digest when present (closes the moved-tag window)
+
+### Program listing
+
+- Issue: [container-registry/harbor-satellite#542](https://github.com/container-registry/harbor-satellite/issues/542)
+- CNCF Mentoring: [cncf/mentoring#1999](https://github.com/cncf/mentoring/issues/1999)
