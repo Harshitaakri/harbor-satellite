@@ -19,7 +19,7 @@ ADR-0009 proposes migrating Satellite to an ORAS-based transparent proxy;
 as of this writing `oras.land/oras-go/v2` is only an indirect dependency in
 go.mod and that migration has not landed. Peer distribution is designed so
 it does not depend on that migration completing first, and can be
-re-homed onto the ArtifactSource abstraction ADR-0009 introduces once it lands.
+re-homed onto the resolve/fetch/copy model ADR-0009 introduces once it lands.
 
 ## Decision Drivers
 
