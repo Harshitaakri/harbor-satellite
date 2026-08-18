@@ -114,6 +114,9 @@ func (r *BasicReplicator) Replicate(ctx context.Context, replicationEntities []E
 		}
 
 		srcRef := fmt.Sprintf("%s/%s/%s:%s", r.sourceRegistry, entity.GetRepository(), entity.GetName(), entity.GetTag())
+		if entity.Digest != "" {
+			srcRef = fmt.Sprintf("%s/%s/%s@%s", r.sourceRegistry, entity.GetRepository(), entity.GetName(), entity.Digest)
+		}
 		dstRef := fmt.Sprintf("%s/%s/%s:%s", r.remoteRegistryURL, entity.GetRepository(), entity.GetName(), entity.GetTag())
 
 		src, err := name.ParseReference(srcRef, nameOpts...)

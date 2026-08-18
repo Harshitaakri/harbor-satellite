@@ -357,3 +357,32 @@ func TestDeleteReplicationEntity_CancelledContextStopsProcessing(t *testing.T) {
 
 	require.ErrorIs(t, err, context.Canceled)
 }
+
+func TestReplicate_DigestPinnedIgnoresMovedTag(t *testing.T) {
+	srcAddr := newTestRegistry(t)
+	dstAddr := newTestRegistry(t)
+
+	imgA := pushImage(t, srcAddr, "alpine", "stable", 2)
+	digestA, err := imgA.Digest()
+	require.NoError(t, err)
+
+	// Move the "stable" tag to point at a different image (different layer count)
+	pushImage(t, srcAddr, "alpine", "stable", 5)
+
+	r := NewBasicReplicator("", "", srcAddr, dstAddr, "", "", true)
+	ctx := testContext()
+
+	err = r.Replicate(ctx, []Entity{
+		{Name: "alpine", Repository: "library", Tag: "stable", Digest: digestA.String()},
+	})
+	require.NoError(t, err)
+
+	dstRef, err := name.ParseReference(dstAddr+"/library/alpine:stable", name.Insecure)
+	require.NoError(t, err)
+	dstImg, err := remote.Image(dstRef)
+	require.NoError(t, err)
+	dstLayers, err := dstImg.Layers()
+	require.NoError(t, err)
+
+	require.Len(t, dstLayers, 2, "replicated image should match digest-pinned image A (2 layers), not the moved tag's image B (5 layers)")
+}
