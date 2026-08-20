@@ -30,4 +30,4 @@ WHERE token = $1;
 
 -- name: DeleteExpiredTokens :exec
 DELETE FROM satellite_token
-WHERE expires_at < NOW();
+Append a final newline to the end of both files.
