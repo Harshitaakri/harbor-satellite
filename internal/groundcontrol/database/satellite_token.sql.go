@@ -29,6 +29,26 @@ func (q *Queries) AddToken(ctx context.Context, arg AddTokenParams) (string, err
 	return token, err
 }
 
+const claimToken = `-- name: ClaimToken :one
+DELETE FROM satellite_token
+WHERE token = $1
+RETURNING id, satellite_id, token, created_at, updated_at, expires_at
+`
+
+func (q *Queries) ClaimToken(ctx context.Context, token string) (SatelliteToken, error) {
+	row := q.db.QueryRowContext(ctx, claimToken, token)
+	var i SatelliteToken
+	err := row.Scan(
+		&i.ID,
+		&i.SatelliteID,
+		&i.Token,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
 const deleteExpiredTokens = `-- name: DeleteExpiredTokens :exec
 DELETE FROM satellite_token
 WHERE expires_at < NOW()

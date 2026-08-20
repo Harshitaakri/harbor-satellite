@@ -12,6 +12,11 @@ WHERE token = $1;
 SELECT * FROM satellite_token
 WHERE token = $1;
 
+-- name: ClaimToken :one
+DELETE FROM satellite_token
+WHERE token = $1
+RETURNING *;
+
 -- name: GetToken :one
 SELECT * FROM satellite_token
 WHERE id = $1;

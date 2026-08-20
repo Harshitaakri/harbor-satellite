@@ -255,11 +255,17 @@ func (s *Server) Ztr(w http.ResponseWriter, r *http.Request) {
 
 	q := s.dbQueries
 
-	// Get full token info including expiry
-	tokenInfo, err := q.GetTokenByValue(r.Context(), token)
+	// Atomically delete and fetch the token in one step. This closes the
+	// reuse window: if two requests race on the same token, only one of
+	// them will see a row deleted; the other gets sql.ErrNoRows and is
+	// rejected below. Previously the token was looked up here but only
+	// deleted at the very end of this handler, so concurrent or replayed
+	// requests with the same token could both pass validation and both
+	// trigger a robot secret rotation.
+	tokenInfo, err := q.ClaimToken(r.Context(), token)
 	if err != nil {
 		masked := maskToken(token)
-		log.Printf("Invalid Satellite Token %s: %v", masked, err)
+		log.Printf("Invalid or already-used Satellite Token %s: %v", masked, err)
 		s.auditEvent(r, auditlog.AuditEvent{
 			Operation:    auditlog.OpAuth,
 			ResourceType: auditlog.ResSatellite,
@@ -374,17 +380,7 @@ func (s *Server) Ztr(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	err = q.DeleteToken(r.Context(), token)
-	if err != nil {
-		log.Println("error deleting token")
-		log.Println(err)
-		err := &AppError{
-			Message: "Error: Error deleting token",
-			Code:    http.StatusInternalServerError,
-		}
-		HandleAppError(w, err)
-		return
-	}
+	// Token was already atomically deleted by ClaimToken above.
 
 	s.auditEvent(r, auditlog.AuditEvent{
 		Operation:    auditlog.OpRegister,
