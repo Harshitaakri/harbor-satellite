@@ -339,6 +339,63 @@ func TestReplicate_CancelledContextStopsProcessing(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+func TestReplicate_ContinuesPastFailingEntity(t *testing.T) {
+	srcAddr := newTestRegistry(t)
+	dstAddr := newTestRegistry(t)
+
+	pushImage(t, srcAddr, "good1", "v1", 1)
+	// "missing" is never pushed — simulates an unreachable artifact
+	pushImage(t, srcAddr, "good2", "v1", 1)
+
+	r := NewBasicReplicator("", "", srcAddr, dstAddr, "", "", true)
+	ctx := testContext()
+
+	err := r.Replicate(ctx, []Entity{
+		{Name: "good1", Repository: "library", Tag: "v1"},
+		{Name: "missing", Repository: "library", Tag: "v1"},
+		{Name: "good2", Repository: "library", Tag: "v1"},
+	})
+	// Should return an error (for "missing") but not block the others
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing")
+
+	// good1 and good2 should both exist at destination despite the middle failure
+	for _, img := range []string{"good1", "good2"} {
+		ref, parseErr := name.ParseReference(dstAddr+"/library/"+img+":v1", name.Insecure)
+		require.NoError(t, parseErr)
+		_, headErr := remote.Head(ref)
+		require.NoError(t, headErr, "%s should have been replicated despite earlier failure", img)
+	}
+}
+
+func TestDeleteReplicationEntity_ContinuesPastFailingEntity(t *testing.T) {
+	dstAddr := newTestRegistry(t)
+
+	pushImage(t, dstAddr, "img1", "v1", 1)
+	// "ghost" was never pushed — delete will fail
+	pushImage(t, dstAddr, "img3", "v1", 1)
+
+	r := NewBasicReplicator("", "", "", dstAddr, "", "", true)
+	ctx := testContext()
+
+	err := r.DeleteReplicationEntity(ctx, []Entity{
+		{Name: "img1", Repository: "library", Tag: "v1"},
+		{Name: "ghost", Repository: "library", Tag: "v1"},
+		{Name: "img3", Repository: "library", Tag: "v1"},
+	})
+	// Should return an error for "ghost" but still delete the others
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ghost")
+
+	// img1 and img3 should be gone
+	for _, img := range []string{"img1", "img3"} {
+		ref, parseErr := name.ParseReference(dstAddr+"/library/"+img+":v1", name.Insecure)
+		require.NoError(t, parseErr)
+		_, headErr := remote.Head(ref)
+		require.Error(t, headErr, "%s should have been deleted despite middle failure", img)
+	}
+}
+
 func TestDeleteReplicationEntity_CancelledContextStopsProcessing(t *testing.T) {
 	dstAddr := newTestRegistry(t)
 

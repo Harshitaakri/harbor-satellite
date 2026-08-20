@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -104,6 +105,7 @@ func (r *BasicReplicator) Replicate(ctx context.Context, replicationEntities []E
 		}
 	}
 
+	var errs []error
 	for _, entity := range replicationEntities {
 		// Check context cancellation before processing each image
 		select {
@@ -114,29 +116,36 @@ func (r *BasicReplicator) Replicate(ctx context.Context, replicationEntities []E
 		}
 
 		srcRef := fmt.Sprintf("%s/%s/%s:%s", r.sourceRegistry, entity.GetRepository(), entity.GetName(), entity.GetTag())
+		if entity.Digest != "" {
+			srcRef = fmt.Sprintf("%s/%s/%s@%s", r.sourceRegistry, entity.GetRepository(), entity.GetName(), entity.Digest)
+		}
 		dstRef := fmt.Sprintf("%s/%s/%s:%s", r.remoteRegistryURL, entity.GetRepository(), entity.GetName(), entity.GetTag())
 
 		src, err := name.ParseReference(srcRef, nameOpts...)
 		if err != nil {
-			return fmt.Errorf("parse source ref %s: %w", srcRef, err)
+			errs = append(errs, fmt.Errorf("parse source ref %s: %w", srcRef, err))
+			continue
 		}
 
 		dst, err := name.ParseReference(dstRef, nameOpts...)
 		if err != nil {
-			return fmt.Errorf("parse dest ref %s: %w", dstRef, err)
+			errs = append(errs, fmt.Errorf("parse dest ref %s: %w", dstRef, err))
+			continue
 		}
 
 		// Lazy fetch: only the manifest is downloaded, no layer data yet
 		desc, err := remote.Get(src, pullOpts...)
 		if err != nil {
-			log.Error().Msgf("Failed to fetch image descriptor: %v", err)
-			return err
+			log.Error().Str("image", entity.GetName()).Msgf("Failed to fetch image descriptor: %v", err)
+			errs = append(errs, fmt.Errorf("fetch %s: %w", entity.GetName(), err))
+			continue
 		}
 
 		img, err := desc.Image()
 		if err != nil {
-			log.Error().Msgf("Failed to resolve image: %v", err)
-			return err
+			log.Error().Str("image", entity.GetName()).Msgf("Failed to resolve image: %v", err)
+			errs = append(errs, fmt.Errorf("resolve %s: %w", entity.GetName(), err))
+			continue
 		}
 
 		// Lazy OCI conversion, no data materialized
@@ -145,7 +154,8 @@ func (r *BasicReplicator) Replicate(ctx context.Context, replicationEntities []E
 		// Check if image already exists at destination with same digest
 		srcDigest, err := ociImage.Digest()
 		if err != nil {
-			return fmt.Errorf("compute source digest: %w", err)
+			errs = append(errs, fmt.Errorf("compute source digest for %s: %w", entity.GetName(), err))
+			continue
 		}
 
 		dstDesc, dstErr := remote.Head(dst, pushOpts...)
@@ -157,7 +167,8 @@ func (r *BasicReplicator) Replicate(ctx context.Context, replicationEntities []E
 		// Log which layers need pulling vs already present
 		srcLayers, err := ociImage.Layers()
 		if err != nil {
-			return fmt.Errorf("get source layers: %w", err)
+			errs = append(errs, fmt.Errorf("get source layers for %s: %w", entity.GetName(), err))
+			continue
 		}
 
 		missing := r.countMissingLayers(dst, srcLayers, pushOpts)
@@ -167,13 +178,14 @@ func (r *BasicReplicator) Replicate(ctx context.Context, replicationEntities []E
 		// the destination first; only missing blobs are pulled from source.
 		// Manifest is pushed last.
 		if err := remote.Write(dst, ociImage, pushOpts...); err != nil {
-			log.Error().Msgf("Failed to replicate image: %v", err)
-			return err
+			log.Error().Str("image", entity.GetName()).Msgf("Failed to replicate image: %v", err)
+			errs = append(errs, fmt.Errorf("replicate %s: %w", entity.GetName(), err))
+			continue
 		}
 		log.Info().Msgf("Image %s replicated successfully", entity.GetName())
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // countMissingLayers checks which source layers are absent from the destination
@@ -226,6 +238,7 @@ func (r *BasicReplicator) DeleteReplicationEntity(ctx context.Context, replicati
 		options = append(options, crane.Insecure)
 	}
 
+	var errs []error
 	for _, entity := range replicationEntity {
 		// Check context cancellation before processing each image
 		select {
@@ -239,13 +252,14 @@ func (r *BasicReplicator) DeleteReplicationEntity(ctx context.Context, replicati
 
 		err := crane.Delete(fmt.Sprintf("%s/%s/%s:%s", r.remoteRegistryURL, entity.GetRepository(), entity.GetName(), entity.GetTag()), options...)
 		if err != nil {
-			log.Error().Msgf("Failed to delete image: %v", err)
-			return err
+			log.Error().Str("image", entity.GetName()).Msgf("Failed to delete image: %v", err)
+			errs = append(errs, fmt.Errorf("delete %s: %w", entity.GetName(), err))
+			continue
 		}
 		log.Info().Msgf("Image %s deleted successfully", entity.GetName())
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func (r *BasicReplicator) buildTLSTransport() (http.RoundTripper, error) {
