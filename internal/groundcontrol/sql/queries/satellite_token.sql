@@ -13,9 +13,19 @@ SELECT * FROM satellite_token
 WHERE token = $1;
 
 -- name: ClaimToken :one
-DELETE FROM satellite_token
-WHERE token = $1
+UPDATE satellite_token
+SET claimed_at = NOW()
+WHERE token = $1 AND claimed_at IS NULL
 RETURNING *;
+
+-- name: ConsumeToken :exec
+DELETE FROM satellite_token
+WHERE token = $1;
+
+-- name: UnclaimToken :exec
+UPDATE satellite_token
+SET claimed_at = NULL
+WHERE token = $1;
 
 -- name: GetToken :one
 SELECT * FROM satellite_token
