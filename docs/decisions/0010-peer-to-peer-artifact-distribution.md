@@ -1,6 +1,7 @@
 ---
 status: proposed
 date: 2026-08-18
+updated: 2026-08-30
 deciders: [Harbor Satellite Development Team]
 informed: [Harbor Satellite Developers]
 ---
@@ -14,19 +15,20 @@ same isolated network already holds the needed artifact. This proposal
 (tracked in issue #542) adds an opt-in mode for trusted Satellites to share
 artifacts directly, without Internet, Harbor, or Ground Control connectivity.
 
-This ADR is scoped to run on the current replication architecture.
-ADR-0009 proposes migrating Satellite to an ORAS-based transparent proxy;
-as of this writing `oras.land/oras-go/v2` is only an indirect dependency in
-go.mod and that migration has not landed. Peer distribution is designed so
-it does not depend on that migration completing first, and can be
-re-homed onto the resolve/fetch/copy model ADR-0009 introduces once it lands.
+This ADR builds on the ORAS-based store architecture landed in PR #648,
+which replaced the embedded Zot registry with `OCIStore`
+(`internal/satellite/store/oci.go`) and `RegistryStore`
+(`internal/satellite/store/registry.go`) backed by `oras.land/oras-go/v2`.
+Peer distribution attaches to this resolve/fetch/copy model — the peer is
+an additional source registered through the same `Store` interface and
+`NewOCIStore` / `NewRegistryStore` setup path.
 
 ## Decision Drivers
 
 * Digest integrity must not be weaker than the existing replication path.
 * Must function fully headless: no Ground Control, no Internet.
 * Must not assume any particular peer registry implementation — Satellites
-  can run either the embedded Zot registry or a BYO external registry
+  can use the OCI image-layout store or a BYO external registry
   (see docker-compose.byo.yml), so eligibility checks must use only the
   plain OCI Distribution API, not registry-specific extensions.
 * Opt-in and zero-cost when disabled; existing bootstrap/replication flows
@@ -36,7 +38,7 @@ re-homed onto the resolve/fetch/copy model ADR-0009 introduces once it lands.
 ## Considered Options
 
 1. A custom peer transfer protocol.
-2. Reusing Zot's built-in sync/pull-through extension.
+2. Reusing registry-native sync/pull-through extensions.
 3. Treating each peer as a plain OCI registry and using the standard
    Distribution API for both eligibility checks and transfer.
 
@@ -47,7 +49,7 @@ peer is addressed the same way any registry is: HEAD/GET against the
 Distribution API. The only new surface this proposal adds is peer
 selection (which peer to ask), health/reachability tracking, and
 retry/backoff — not a new transfer protocol. This keeps the feature
-portable across embedded Zot and BYO-registry peers by construction.
+portable across the OCI-layout store and BYO-registry peers by construction.
 
 Peer discovery is explicit configuration only in this phase — a static
 list of trusted peer endpoints. No mDNS, gossip, or Ground-Control-driven
@@ -80,11 +82,30 @@ timeouts, retries, and concurrency limits).
 * Ground Control scheduling or fleet-wide dashboards.
 * Changes to image signing.
 
+## Digest-Domain Rule — Current Enforcement
+
+The digest-preferred source resolution rule proposed above is now partially
+enforced on main: `Artifact.sourceIdentifier()` (`store/store.go`) prefers
+the digest over the tag for both store paths (`RegistryStore`, `OCIStore`).
+PR #637 closes the remaining gap in `DirectDeliverer`
+(`state/direct_delivery.go`), applying the same semantics to the k3s
+tarball delivery path. This turns the rule from proposal into description
+for the existing replication paths; the peer path inherits it by
+construction when it attaches to the `Store` interface.
+
+## Peer Serving Surface
+
+PR #649 introduces a proxy package (`internal/satellite/proxy`) as the
+intended serving surface for peers. The attach-point between the peer
+selection logic proposed here and that proxy remains an open question for
+maintainer discussion.
+
 ## Consequences
 
 Positive: closes real operational overhead in air-gapped edge expansion;
 portable across registry backends; no new attack surface beyond the
 existing digest-verification guarantees.
 
-Negative: a second content-source code path to maintain until ADR-0009's
-resolve/fetch/copy abstraction lands and this can be folded into it.
+Negative: peer selection and health tracking are new code paths to
+maintain. The serving surface (PR #649's proxy package) is in flight and
+may require coordination once both land.
