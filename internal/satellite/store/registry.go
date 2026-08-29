@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -63,6 +64,7 @@ func (r *RegistryStore) Replicate(ctx context.Context, replicationEntities []Art
 		}
 	}
 
+	var errs []error
 	for _, entity := range replicationEntities {
 		// Check context cancellation before processing each image
 		select {
@@ -73,7 +75,9 @@ func (r *RegistryStore) Replicate(ctx context.Context, replicationEntities []Art
 		}
 
 		if err := entity.validate(); err != nil {
-			return err
+			log.Warn().Err(err).Str("entity", entity.Name).Msg("Skipping entity: validation failed")
+			errs = append(errs, fmt.Errorf("validate entity %s: %w", entity.Name, err))
+			continue
 		}
 
 		srcRef := r.source.reference(entity, entity.sourceIdentifier())
@@ -81,25 +85,31 @@ func (r *RegistryStore) Replicate(ctx context.Context, replicationEntities []Art
 
 		src, err := name.ParseReference(srcRef, nameOpts...)
 		if err != nil {
-			return fmt.Errorf("parse source ref %s: %w", srcRef, err)
+			log.Warn().Err(err).Str("entity", entity.Name).Str("ref", srcRef).Msg("Skipping entity: failed to parse source ref")
+			errs = append(errs, fmt.Errorf("parse source ref %s: %w", srcRef, err))
+			continue
 		}
 
 		dst, err := name.ParseReference(dstRef, nameOpts...)
 		if err != nil {
-			return fmt.Errorf("parse dest ref %s: %w", dstRef, err)
+			log.Warn().Err(err).Str("entity", entity.Name).Str("ref", dstRef).Msg("Skipping entity: failed to parse dest ref")
+			errs = append(errs, fmt.Errorf("parse dest ref %s: %w", dstRef, err))
+			continue
 		}
 
 		// Lazy fetch: only the manifest is downloaded, no layer data yet
 		desc, err := remote.Get(src, pullOpts...)
 		if err != nil {
-			log.Error().Msgf("Failed to fetch image descriptor: %v", err)
-			return err
+			log.Warn().Err(err).Str("entity", entity.Name).Str("ref", srcRef).Msg("Skipping entity: failed to fetch image descriptor")
+			errs = append(errs, fmt.Errorf("fetch image descriptor %s: %w", entity.Name, err))
+			continue
 		}
 
 		img, err := desc.Image()
 		if err != nil {
-			log.Error().Msgf("Failed to resolve image: %v", err)
-			return err
+			log.Warn().Err(err).Str("entity", entity.Name).Msg("Skipping entity: failed to resolve image")
+			errs = append(errs, fmt.Errorf("resolve image %s: %w", entity.Name, err))
+			continue
 		}
 
 		// Lazy OCI conversion, no data materialized
@@ -108,7 +118,9 @@ func (r *RegistryStore) Replicate(ctx context.Context, replicationEntities []Art
 		// Check if image already exists at destination with same digest
 		srcDigest, err := ociImage.Digest()
 		if err != nil {
-			return fmt.Errorf("compute source digest: %w", err)
+			log.Warn().Err(err).Str("entity", entity.Name).Msg("Skipping entity: failed to compute source digest")
+			errs = append(errs, fmt.Errorf("compute source digest %s: %w", entity.Name, err))
+			continue
 		}
 
 		dstDesc, dstErr := remote.Head(dst, pushOpts...)
@@ -120,7 +132,9 @@ func (r *RegistryStore) Replicate(ctx context.Context, replicationEntities []Art
 		// Log which layers need pulling vs already present
 		srcLayers, err := ociImage.Layers()
 		if err != nil {
-			return fmt.Errorf("get source layers: %w", err)
+			log.Warn().Err(err).Str("entity", entity.Name).Msg("Skipping entity: failed to get source layers")
+			errs = append(errs, fmt.Errorf("get source layers %s: %w", entity.Name, err))
+			continue
 		}
 
 		missing := r.countMissingLayers(dst, srcLayers, pushOpts)
@@ -130,13 +144,14 @@ func (r *RegistryStore) Replicate(ctx context.Context, replicationEntities []Art
 		// the destination first; only missing blobs are pulled from source.
 		// Manifest is pushed last.
 		if err := remote.Write(dst, ociImage, pushOpts...); err != nil {
-			log.Error().Msgf("Failed to replicate image: %v", err)
-			return err
+			log.Warn().Err(err).Str("entity", entity.Name).Msg("Skipping entity: failed to replicate image")
+			errs = append(errs, fmt.Errorf("replicate image %s: %w", entity.Name, err))
+			continue
 		}
 		log.Info().Msgf("Image %s replicated successfully", entity.Name)
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // countMissingLayers checks which source layers are absent from the destination
