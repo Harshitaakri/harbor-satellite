@@ -86,7 +86,18 @@ func (d *DirectDeliverer) Deliver(ctx context.Context, entities []Entity) error 
 			continue
 		}
 
-		srcRef := fmt.Sprintf("%s/%s/%s:%s", d.srcRegistry, entity.Repository, entity.Name, entity.Tag)
+		identifier := entity.Tag
+		if entity.Digest != "" {
+			identifier = entity.Digest
+			if _, dgst, ok := strings.Cut(entity.Digest, "@"); ok {
+				identifier = dgst
+			}
+		}
+		separator := ":"
+		if strings.Contains(identifier, ":") {
+			separator = "@"
+		}
+		srcRef := fmt.Sprintf("%s/%s/%s%s%s", d.srcRegistry, entity.Repository, entity.Name, separator, identifier)
 		ref, err := name.ParseReference(srcRef, nameOpts...)
 		if err != nil {
 			log.Warn().Err(err).Str("ref", srcRef).Msg("Direct delivery: failed to parse reference, skipping")
