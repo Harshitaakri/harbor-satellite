@@ -87,7 +87,7 @@ timeouts, retries, and concurrency limits).
 The digest-preferred source resolution rule proposed above is now partially
 enforced on main: `Artifact.sourceIdentifier()` (`store/store.go`) prefers
 the digest over the tag for both store paths (`RegistryStore`, `OCIStore`).
-PR #637 closes the remaining gap in `DirectDeliverer`
+PR #637 will close the remaining gap in `DirectDeliverer` once merged
 (`state/direct_delivery.go`), applying the same semantics to the k3s
 tarball delivery path. This turns the rule from proposal into description
 for the existing replication paths; the peer path inherits it by
