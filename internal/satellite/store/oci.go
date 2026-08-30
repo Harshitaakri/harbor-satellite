@@ -65,7 +65,7 @@ func (s *OCIStore) Replicate(ctx context.Context, artifacts []Artifact) error {
 		source, err := newRepository(s.source, artifact)
 		if err != nil {
 			log.Warn().Err(err).Str("artifact", artifact.Name).Msg("Skipping artifact: failed to create source repository")
-			errs = append(errs, err)
+			errs = append(errs, fmt.Errorf("create source repository for artifact %s: %w", artifact.Name, err))
 			continue
 		}
 		destinationRef := s.reference(artifact)
