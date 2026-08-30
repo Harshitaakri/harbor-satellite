@@ -98,21 +98,31 @@ func (d *DirectDeliverer) Deliver(ctx context.Context, entities []Entity) error 
 			separator = "@"
 		}
 		srcRef := fmt.Sprintf("%s/%s/%s%s%s", d.srcRegistry, entity.Repository, entity.Name, separator, identifier)
-		ref, err := name.ParseReference(srcRef, nameOpts...)
+		pullRef, err := name.ParseReference(srcRef, nameOpts...)
 		if err != nil {
 			log.Warn().Err(err).Str("ref", srcRef).Msg("Direct delivery: failed to parse reference, skipping")
 			continue
 		}
 
 		opts := []remote.Option{remote.WithAuth(auth), remote.WithContext(ctx)}
-		img, err := remote.Image(ref, opts...)
+		img, err := remote.Image(pullRef, opts...)
 		if err != nil {
 			log.Warn().Err(err).Str("ref", srcRef).Msg("Direct delivery: failed to pull image, skipping")
 			continue
 		}
 
+		// Use a tag-based reference for the tarball's RepoTags so k3s
+		// imports the image under the expected name:tag.
+		tagRef := pullRef
+		if entity.Tag != "" {
+			tagSrcRef := fmt.Sprintf("%s/%s/%s:%s", d.srcRegistry, entity.Repository, entity.Name, entity.Tag)
+			if parsed, err := name.ParseReference(tagSrcRef, nameOpts...); err == nil {
+				tagRef = parsed
+			}
+		}
+
 		dstPath := filepath.Join(d.imageDir, filename)
-		if err := d.writeAtomically(dstPath, ref, img); err != nil {
+		if err := d.writeAtomically(dstPath, tagRef, img); err != nil {
 			log.Warn().Err(err).Str("file", filename).Msg("Direct delivery: failed to write tarball, skipping")
 			continue
 		}

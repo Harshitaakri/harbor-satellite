@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"io"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -175,11 +176,21 @@ func TestDeliver_DigestPinned(t *testing.T) {
 	entity := Entity{Repository: "repo", Name: "name", Tag: "v1", Digest: digestA.String()}
 	require.NoError(t, d.Deliver(testContext(), []Entity{entity}))
 
-	got, err := tarball.ImageFromPath(filepath.Join(dir, tarballFilename(entity)), nil)
+	tarPath := filepath.Join(dir, tarballFilename(entity))
+	got, err := tarball.ImageFromPath(tarPath, nil)
 	require.NoError(t, err)
 	gotDigest, err := got.Digest()
 	require.NoError(t, err)
 	require.Equal(t, digestA, gotDigest, "should deliver the pinned digest, not the moved tag")
+
+	// Verify the tarball's RepoTags uses the tag, not the digest ref,
+	// so k3s imports the image under the expected name:tag.
+	manifest, err := tarball.LoadManifest(func() (io.ReadCloser, error) { return os.Open(tarPath) })
+	require.NoError(t, err)
+	require.NotEmpty(t, manifest)
+	require.NotEmpty(t, manifest[0].RepoTags, "tarball must carry RepoTags for k3s import")
+	require.Contains(t, manifest[0].RepoTags[0], ":v1", "RepoTags should use tag, not digest ref")
+	require.NotContains(t, manifest[0].RepoTags[0], "@sha256:", "RepoTags must not contain digest ref")
 }
 
 func TestDeliver_TagFallback(t *testing.T) {
